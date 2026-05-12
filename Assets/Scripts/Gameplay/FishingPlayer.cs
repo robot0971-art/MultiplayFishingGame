@@ -841,6 +841,7 @@ namespace MultiplayFishing.Gameplay
             {
                 if (hasRodPutAwayTrigger) animator.ResetTrigger(rodPutAwayTriggerHash);
                 if (hasRodEquippedParam) animator.SetBool(rodEquippedParamHash, true);
+                rodVisibility?.SetRodVisible(true);
                 fishingController?.ShowRodLineVisuals();
                 animator.SetTrigger(rodTakeOutTriggerHash);
             }
