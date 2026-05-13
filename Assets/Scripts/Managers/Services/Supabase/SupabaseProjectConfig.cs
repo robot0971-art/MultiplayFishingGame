@@ -15,7 +15,6 @@ namespace MultiplayFishing.Core
 
         public bool HasRequiredValues =>
             !string.IsNullOrWhiteSpace(ProjectUrl) &&
-            !string.IsNullOrWhiteSpace(PublishableKey) &&
-            !string.IsNullOrWhiteSpace(AccessToken);
+            !string.IsNullOrWhiteSpace(PublishableKey);
     }
 }

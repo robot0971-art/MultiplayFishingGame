@@ -62,3 +62,7 @@ Thumbs.db
 
 # OpenSpec
 openspec/changes/archive/
+
+# Local Supabase project credentials/config assets
+/[Aa]ssets/[Ss]upa[Bb]ase/
+/[Aa]ssets/[Ss]upa[Bb]ase.meta
