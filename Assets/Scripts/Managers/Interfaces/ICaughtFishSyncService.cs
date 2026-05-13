@@ -8,5 +8,7 @@ namespace MultiplayFishing.Core
 
         void SaveCaughtFish(string playerName, string fishId, float length, FishDataSO fishData);
         void SyncCaughtFishToLocal(IUserService userService);
+        void MarkCaughtFishSold(InventoryItem item);
+        void MarkCaughtFishSold(System.Collections.Generic.IEnumerable<InventoryItem> items);
     }
 }

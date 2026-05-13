@@ -11,6 +11,7 @@ namespace MultiplayFishing.Core
         private UserSaveData userData = new UserSaveData();
         private readonly string savePath;
         private readonly IDataService dataService;
+        private ICaughtFishSyncService caughtFishSyncService;
 
         public UserSaveData UserData => userData;
         public event Action OnDataChanged;
@@ -42,7 +43,7 @@ namespace MultiplayFishing.Core
             OnDataChanged?.Invoke(); // UI에 알림
         }
 
-        public bool MergeFishFromRemote(string fishId, float length, long caughtTime)
+        public bool MergeFishFromRemote(string remoteId, string fishId, float length, long caughtTime)
         {
             EnsureUserData();
 
@@ -51,10 +52,12 @@ namespace MultiplayFishing.Core
                 return false;
             }
 
-            bool alreadyExists = userData.inventory.Exists(item =>
-                item.fishId == fishId &&
-                Mathf.Abs(item.length - length) < 0.01f &&
-                item.caughtTime == caughtTime);
+            bool alreadyExists = !string.IsNullOrWhiteSpace(remoteId)
+                ? userData.inventory.Exists(item => item.remoteId == remoteId)
+                : userData.inventory.Exists(item =>
+                    item.fishId == fishId &&
+                    Mathf.Abs(item.length - length) < 0.01f &&
+                    item.caughtTime == caughtTime);
 
             if (alreadyExists)
             {
@@ -63,6 +66,7 @@ namespace MultiplayFishing.Core
 
             InventoryItem remoteItem = new InventoryItem(fishId, length)
             {
+                remoteId = remoteId,
                 caughtTime = caughtTime
             };
             userData.inventory.Add(remoteItem);
@@ -80,6 +84,7 @@ namespace MultiplayFishing.Core
                 {
                     userData.gold += fishInfo.sellPrice;
                     userData.inventory.Remove(item);
+                    SyncSoldFish(item);
                     Debug.Log($"[UserStorageService] Sold {fishInfo.fishName}. Current Gold: {userData.gold}");
                     Save();
                     OnDataChanged?.Invoke(); // UI에 알림
@@ -92,6 +97,7 @@ namespace MultiplayFishing.Core
             if (userData.inventory.Count == 0) return;
 
             int totalGain = 0;
+            List<InventoryItem> soldItems = new List<InventoryItem>(userData.inventory);
             foreach (var item in userData.inventory)
             {
                 var fishInfo = dataService.GetFishData(item.fishId);
@@ -103,6 +109,7 @@ namespace MultiplayFishing.Core
 
             userData.gold += totalGain;
             userData.inventory.Clear();
+            SyncSoldFish(soldItems);
             
             Debug.Log($"[UserStorageService] Bulk sold all fish. Gained {totalGain}G. Total Gold: {userData.gold}");
             
@@ -290,6 +297,29 @@ namespace MultiplayFishing.Core
             userData.ownedBaitIds ??= new List<string>();
             userData.equippedRodId ??= "";
             userData.equippedBaitId ??= "";
+        }
+
+        private void SyncSoldFish(InventoryItem item)
+        {
+            if (item == null) return;
+
+            EnsureCaughtFishSyncService();
+            caughtFishSyncService?.MarkCaughtFishSold(item);
+        }
+
+        private void SyncSoldFish(IEnumerable<InventoryItem> items)
+        {
+            if (items == null) return;
+
+            EnsureCaughtFishSyncService();
+            caughtFishSyncService?.MarkCaughtFishSold(items);
+        }
+
+        private void EnsureCaughtFishSyncService()
+        {
+            if (caughtFishSyncService != null) return;
+
+            DIContainer.TryResolve(out caughtFishSyncService);
         }
     }
 }

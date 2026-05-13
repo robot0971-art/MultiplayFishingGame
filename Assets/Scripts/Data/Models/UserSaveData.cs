@@ -8,6 +8,7 @@ namespace MultiplayFishing.Data.Models
     public class InventoryItem
     {
         public string instanceId;
+        public string remoteId;
         public string fishId;
         public float length;
         public long caughtTime;

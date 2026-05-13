@@ -70,6 +70,40 @@ namespace MultiplayFishing.Core
             StartCoroutine(SyncCaughtFishToLocalRoutine(userService));
         }
 
+        public void MarkCaughtFishSold(InventoryItem item)
+        {
+            if (item == null || string.IsNullOrWhiteSpace(item.remoteId))
+            {
+                return;
+            }
+
+            StartCoroutine(MarkCaughtFishSoldRoutine(new[] { item }));
+        }
+
+        public void MarkCaughtFishSold(IEnumerable<InventoryItem> items)
+        {
+            if (items == null)
+            {
+                return;
+            }
+
+            List<InventoryItem> remoteItems = new List<InventoryItem>();
+            foreach (InventoryItem item in items)
+            {
+                if (item != null && !string.IsNullOrWhiteSpace(item.remoteId))
+                {
+                    remoteItems.Add(item);
+                }
+            }
+
+            if (remoteItems.Count == 0)
+            {
+                return;
+            }
+
+            StartCoroutine(MarkCaughtFishSoldRoutine(remoteItems));
+        }
+
         private IEnumerator PostCaughtFishRoutine(string playerName, string fishId, float length, FishDataSO fishData)
         {
             string accessToken = null;
@@ -122,7 +156,7 @@ namespace MultiplayFishing.Core
                 yield break;
             }
 
-            string url = $"{config.ProjectUrl}/rest/v1/caught_fish?select=fish_id,length_cm,caught_at&order=caught_at.desc";
+            string url = $"{config.ProjectUrl}/rest/v1/caught_fish?select=id,fish_id,length_cm,caught_at&sold_at=is.null&order=caught_at.desc";
             using UnityWebRequest request = UnityWebRequest.Get(url);
             request.SetRequestHeader("apikey", config.PublishableKey);
             request.SetRequestHeader("Authorization", $"Bearer {accessToken}");
@@ -146,7 +180,7 @@ namespace MultiplayFishing.Core
             int mergedCount = 0;
             foreach (CaughtFishRow row in rows)
             {
-                if (userService.MergeFishFromRemote(row.fish_id, row.length_cm, ParseTimestamp(row.caught_at)))
+                if (userService.MergeFishFromRemote(row.id, row.fish_id, row.length_cm, ParseTimestamp(row.caught_at)))
                 {
                     mergedCount++;
                 }
@@ -158,6 +192,49 @@ namespace MultiplayFishing.Core
             }
 
             Debug.Log($"[SupabaseCaughtFishSyncService] Synced {rows.Count} remote caught fish rows. Merged {mergedCount} new local items.");
+        }
+
+        private IEnumerator MarkCaughtFishSoldRoutine(IEnumerable<InventoryItem> items)
+        {
+            string accessToken = null;
+            yield return EnsureAuthenticatedRoutine(token => accessToken = token);
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase anonymous auth failed. Skipping sold fish sync.");
+                yield break;
+            }
+
+            foreach (InventoryItem item in items)
+            {
+                string url = $"{config.ProjectUrl}/rest/v1/caught_fish?id=eq.{UnityWebRequest.EscapeURL(item.remoteId)}";
+                string body = $"{{\"sold_at\":\"{DateTimeOffset.UtcNow:O}\",\"sold_price\":{GetSellPrice(item.fishId)}}}";
+                byte[] payload = Encoding.UTF8.GetBytes(body);
+
+                using UnityWebRequest request = new UnityWebRequest(url, "PATCH");
+                request.uploadHandler = new UploadHandlerRaw(payload);
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+                request.SetRequestHeader("apikey", config.PublishableKey);
+                request.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+                request.SetRequestHeader("Prefer", "return=minimal");
+
+                if (logRequests)
+                {
+                    Debug.Log($"[SupabaseCaughtFishSyncService] PATCH {url} {body}");
+                }
+
+                yield return request.SendWebRequest();
+
+                if (request.result == UnityWebRequest.Result.Success)
+                {
+                    continue;
+                }
+
+                Debug.LogWarning(
+                    $"[SupabaseCaughtFishSyncService] Failed to mark fish sold. " +
+                    $"RemoteId={item.remoteId}, Code={request.responseCode}, Error={request.error}, Body={request.downloadHandler.text}");
+            }
         }
 
         private IEnumerator SyncCaughtFishWhenUserServiceReadyRoutine()
@@ -356,6 +433,20 @@ namespace MultiplayFishing.Core
             return DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         }
 
+        private static int GetSellPrice(string fishId)
+        {
+            if (DIContainer.TryResolve(out IDataService dataService))
+            {
+                FishDataSO fishData = dataService.GetFishData(fishId);
+                if (fishData != null)
+                {
+                    return fishData.sellPrice;
+                }
+            }
+
+            return 0;
+        }
+
         [Serializable]
         private sealed class SupabaseAuthSession
         {
@@ -373,6 +464,7 @@ namespace MultiplayFishing.Core
         [Serializable]
         private sealed class CaughtFishRow
         {
+            public string id = "";
             public string fish_id = "";
             public float length_cm = 0f;
             public string caught_at = "";

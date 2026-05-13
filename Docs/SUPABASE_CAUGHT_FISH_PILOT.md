@@ -23,6 +23,7 @@ When a local player successfully catches a fish:
 4. If Supabase is not configured, the game continues with only local save.
 
 On startup, `SupabaseCaughtFishSyncService` also reads the current user's `caught_fish` rows and merges missing fish into the local `UserData` cache. Existing UI can keep reading `userService.UserData`.
+Sold fish are marked with `sold_at` and `sold_price` in Supabase, then excluded from future local cache syncs.
 
 ## Security Notes
 
@@ -36,3 +37,5 @@ On startup, `SupabaseCaughtFishSyncService` also reads the current user's `caugh
 `Access Token` is kept on the config asset only as a temporary fallback field. The pilot now signs in anonymously at runtime and refreshes the session with the saved refresh token.
 
 The local `UserData.json` file is still used as a cache. Supabase is the remote source for caught fish history, but the current inventory/encyclopedia UI stays unchanged.
+
+Run `supabase/migrations/0002_caught_fish_sold_state.sql` after the first pilot migration before testing sell sync.
