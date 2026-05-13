@@ -156,9 +156,39 @@ namespace MultiplayFishing.Gameplay
             UpdateSprintUI();
             
             StartCoroutine(SmartEscapeRoutine());
+            SyncProfileName();
+        }
+
+        private void SyncProfileName()
+        {
             string savedName = PlayerPrefs.GetString("PlayerName", $"낚시꾼 {UnityEngine.Random.Range(100, 999)}");
-            OnPlayerNameChangedEvent?.Invoke(savedName);
-            CmdUpdatePlayerName(savedName);
+            if (DIContainer.TryResolve(out ICaughtFishSyncService caughtFishSyncService) && caughtFishSyncService.IsConfigured)
+            {
+                caughtFishSyncService.SyncProfileName(savedName, ApplyResolvedProfileName);
+                return;
+            }
+
+            ApplyResolvedProfileName(savedName);
+        }
+
+        private void ApplyResolvedProfileName(string resolvedName)
+        {
+            if (!isLocalPlayer) return;
+
+            string nextName = string.IsNullOrWhiteSpace(resolvedName)
+                ? $"낚시꾼 {UnityEngine.Random.Range(100, 999)}"
+                : resolvedName.Trim();
+
+            PlayerPrefs.SetString("PlayerName", nextName);
+            PlayerPrefs.Save();
+
+            OnPlayerNameChangedEvent?.Invoke(nextName);
+            CmdUpdatePlayerName(nextName);
+
+            if (DIContainer.TryResolve(out ICaughtFishSyncService caughtFishSyncService))
+            {
+                caughtFishSyncService.SaveProfileName(nextName);
+            }
         }
 
         private void InitializeMovementController()

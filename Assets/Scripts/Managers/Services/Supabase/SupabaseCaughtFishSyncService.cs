@@ -53,6 +53,33 @@ namespace MultiplayFishing.Core
             StartCoroutine(PostCaughtFishRoutine(playerName, fishId, length, fishData));
         }
 
+        public void SyncProfileName(string fallbackName, Action<string> onResolved)
+        {
+            if (!IsConfigured)
+            {
+                onResolved?.Invoke(NormalizePlayerName(fallbackName));
+                return;
+            }
+
+            StartCoroutine(SyncProfileNameRoutine(fallbackName, onResolved));
+        }
+
+        public void SaveProfileName(string playerName)
+        {
+            if (!IsConfigured)
+            {
+                return;
+            }
+
+            string normalizedName = NormalizePlayerName(playerName);
+            if (string.IsNullOrWhiteSpace(normalizedName))
+            {
+                return;
+            }
+
+            StartCoroutine(SaveProfileNameRoutine(normalizedName));
+        }
+
         public void SyncCaughtFishToLocal(IUserService userService)
         {
             if (!IsConfigured)
@@ -169,6 +196,94 @@ namespace MultiplayFishing.Core
 
             Debug.LogWarning(
                 $"[SupabaseCaughtFishSyncService] Failed to save caught fish. " +
+                $"Code={request.responseCode}, Error={request.error}, Body={request.downloadHandler.text}");
+        }
+
+        private IEnumerator SyncProfileNameRoutine(string fallbackName, Action<string> onResolved)
+        {
+            string resolvedFallback = NormalizePlayerName(fallbackName);
+            string accessToken = null;
+            yield return EnsureAuthenticatedRoutine(token => accessToken = token);
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase anonymous auth failed. Using local profile name.");
+                onResolved?.Invoke(resolvedFallback);
+                yield break;
+            }
+
+            string url = $"{config.ProjectUrl}/rest/v1/profiles?select=player_name&limit=1";
+            using UnityWebRequest request = UnityWebRequest.Get(url);
+            request.SetRequestHeader("apikey", config.PublishableKey);
+            request.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+
+            if (logRequests)
+            {
+                Debug.Log($"[SupabaseCaughtFishSyncService] GET {url}");
+            }
+
+            yield return request.SendWebRequest();
+
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogWarning(
+                    $"[SupabaseCaughtFishSyncService] Failed to sync profile. " +
+                    $"Code={request.responseCode}, Error={request.error}, Body={request.downloadHandler.text}");
+                onResolved?.Invoke(resolvedFallback);
+                yield break;
+            }
+
+            List<ProfileRow> rows = ParseProfileRows(request.downloadHandler.text);
+            string remoteName = rows.Count > 0 ? NormalizePlayerName(rows[0].player_name) : "";
+            string resolvedName = !string.IsNullOrWhiteSpace(remoteName) ? remoteName : resolvedFallback;
+
+            if (rows.Count == 0 || string.IsNullOrWhiteSpace(remoteName))
+            {
+                yield return SaveProfileNameRoutine(resolvedName);
+            }
+
+            Debug.Log($"[SupabaseCaughtFishSyncService] Synced profile name: {resolvedName}.");
+            onResolved?.Invoke(resolvedName);
+        }
+
+        private IEnumerator SaveProfileNameRoutine(string playerName)
+        {
+            string accessToken = null;
+            yield return EnsureAuthenticatedRoutine(token => accessToken = token);
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase anonymous auth failed. Skipping profile save.");
+                yield break;
+            }
+
+            string url = $"{config.ProjectUrl}/rest/v1/profiles?on_conflict=user_id";
+            string body = BuildProfileJson(playerName);
+            byte[] payload = Encoding.UTF8.GetBytes(body);
+
+            using UnityWebRequest request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST);
+            request.uploadHandler = new UploadHandlerRaw(payload);
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.SetRequestHeader("apikey", config.PublishableKey);
+            request.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+            request.SetRequestHeader("Prefer", "resolution=merge-duplicates,return=minimal");
+
+            if (logRequests)
+            {
+                Debug.Log($"[SupabaseCaughtFishSyncService] UPSERT {url} {body}");
+            }
+
+            yield return request.SendWebRequest();
+
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                Debug.Log($"[SupabaseCaughtFishSyncService] Saved profile name: {playerName}.");
+                yield break;
+            }
+
+            Debug.LogWarning(
+                $"[SupabaseCaughtFishSyncService] Failed to save profile. " +
                 $"Code={request.responseCode}, Error={request.error}, Body={request.downloadHandler.text}");
         }
 
@@ -506,6 +621,19 @@ namespace MultiplayFishing.Core
                 "}";
         }
 
+        private static string BuildProfileJson(string playerName)
+        {
+            return "{" +
+                $"\"player_name\":\"{EscapeJson(playerName)}\"," +
+                $"\"updated_at\":\"{DateTimeOffset.UtcNow:O}\"" +
+                "}";
+        }
+
+        private static string NormalizePlayerName(string playerName)
+        {
+            return string.IsNullOrWhiteSpace(playerName) ? "" : playerName.Trim();
+        }
+
         private static string EscapeJson(string value)
         {
             if (string.IsNullOrEmpty(value))
@@ -531,6 +659,24 @@ namespace MultiplayFishing.Core
 
             string wrappedJson = "{\"rows\":" + json + "}";
             CaughtFishRowsWrapper wrapper = JsonUtility.FromJson<CaughtFishRowsWrapper>(wrappedJson);
+            if (wrapper?.rows != null)
+            {
+                rows.AddRange(wrapper.rows);
+            }
+
+            return rows;
+        }
+
+        private static List<ProfileRow> ParseProfileRows(string json)
+        {
+            List<ProfileRow> rows = new List<ProfileRow>();
+            if (string.IsNullOrWhiteSpace(json) || json == "[]")
+            {
+                return rows;
+            }
+
+            string wrappedJson = "{\"rows\":" + json + "}";
+            ProfileRowsWrapper wrapper = JsonUtility.FromJson<ProfileRowsWrapper>(wrappedJson);
             if (wrapper?.rows != null)
             {
                 rows.AddRange(wrapper.rows);
@@ -602,6 +748,18 @@ namespace MultiplayFishing.Core
             public string fish_id = "";
             public float length_cm = 0f;
             public string caught_at = "";
+        }
+
+        [Serializable]
+        private sealed class ProfileRowsWrapper
+        {
+            public ProfileRow[] rows = Array.Empty<ProfileRow>();
+        }
+
+        [Serializable]
+        private sealed class ProfileRow
+        {
+            public string player_name = "";
         }
 
         [Serializable]
