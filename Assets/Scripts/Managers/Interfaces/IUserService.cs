@@ -15,6 +15,8 @@ namespace MultiplayFishing.Core
         event Action OnDataChanged;
         
         void AddFish(string fishId, float length);
+        bool MergeFishFromRemote(string fishId, float length, long caughtTime);
+        void SaveRemoteMerge();
 
         void SellFish(string instanceId);
         void SellAllFish();

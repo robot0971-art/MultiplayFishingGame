@@ -7,5 +7,6 @@ namespace MultiplayFishing.Core
         bool IsConfigured { get; }
 
         void SaveCaughtFish(string playerName, string fishId, float length, FishDataSO fishData);
+        void SyncCaughtFishToLocal(IUserService userService);
     }
 }

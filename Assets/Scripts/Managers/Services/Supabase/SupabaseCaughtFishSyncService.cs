@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -11,6 +13,7 @@ namespace MultiplayFishing.Core
     {
         [SerializeField] private SupabaseProjectConfig config;
         [SerializeField] private bool logRequests;
+        [SerializeField] private bool syncRemoteCaughtFishOnStart = true;
 
         private const string AccessTokenKey = "Supabase.AccessToken";
         private const string RefreshTokenKey = "Supabase.RefreshToken";
@@ -21,6 +24,16 @@ namespace MultiplayFishing.Core
         private void Awake()
         {
             DIContainer.Register<ICaughtFishSyncService>(this);
+        }
+
+        private void Start()
+        {
+            if (!syncRemoteCaughtFishOnStart)
+            {
+                return;
+            }
+
+            StartCoroutine(SyncCaughtFishWhenUserServiceReadyRoutine());
         }
 
         public void SaveCaughtFish(string playerName, string fishId, float length, FishDataSO fishData)
@@ -38,6 +51,23 @@ namespace MultiplayFishing.Core
             }
 
             StartCoroutine(PostCaughtFishRoutine(playerName, fishId, length, fishData));
+        }
+
+        public void SyncCaughtFishToLocal(IUserService userService)
+        {
+            if (!IsConfigured)
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase config is missing. Skipping remote fish sync.");
+                return;
+            }
+
+            if (userService == null)
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] UserService is missing. Skipping remote fish sync.");
+                return;
+            }
+
+            StartCoroutine(SyncCaughtFishToLocalRoutine(userService));
         }
 
         private IEnumerator PostCaughtFishRoutine(string playerName, string fishId, float length, FishDataSO fishData)
@@ -79,6 +109,75 @@ namespace MultiplayFishing.Core
             Debug.LogWarning(
                 $"[SupabaseCaughtFishSyncService] Failed to save caught fish. " +
                 $"Code={request.responseCode}, Error={request.error}, Body={request.downloadHandler.text}");
+        }
+
+        private IEnumerator SyncCaughtFishToLocalRoutine(IUserService userService)
+        {
+            string accessToken = null;
+            yield return EnsureAuthenticatedRoutine(token => accessToken = token);
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase anonymous auth failed. Skipping remote fish sync.");
+                yield break;
+            }
+
+            string url = $"{config.ProjectUrl}/rest/v1/caught_fish?select=fish_id,length_cm,caught_at&order=caught_at.desc";
+            using UnityWebRequest request = UnityWebRequest.Get(url);
+            request.SetRequestHeader("apikey", config.PublishableKey);
+            request.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+
+            if (logRequests)
+            {
+                Debug.Log($"[SupabaseCaughtFishSyncService] GET {url}");
+            }
+
+            yield return request.SendWebRequest();
+
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogWarning(
+                    $"[SupabaseCaughtFishSyncService] Failed to sync caught fish. " +
+                    $"Code={request.responseCode}, Error={request.error}, Body={request.downloadHandler.text}");
+                yield break;
+            }
+
+            List<CaughtFishRow> rows = ParseCaughtFishRows(request.downloadHandler.text);
+            int mergedCount = 0;
+            foreach (CaughtFishRow row in rows)
+            {
+                if (userService.MergeFishFromRemote(row.fish_id, row.length_cm, ParseTimestamp(row.caught_at)))
+                {
+                    mergedCount++;
+                }
+            }
+
+            if (mergedCount > 0)
+            {
+                userService.SaveRemoteMerge();
+            }
+
+            Debug.Log($"[SupabaseCaughtFishSyncService] Synced {rows.Count} remote caught fish rows. Merged {mergedCount} new local items.");
+        }
+
+        private IEnumerator SyncCaughtFishWhenUserServiceReadyRoutine()
+        {
+            const float timeoutSeconds = 5f;
+            float elapsed = 0f;
+
+            while (elapsed < timeoutSeconds)
+            {
+                if (DIContainer.TryResolve(out IUserService userService))
+                {
+                    SyncCaughtFishToLocal(userService);
+                    yield break;
+                }
+
+                elapsed += Time.deltaTime;
+                yield return null;
+            }
+
+            Debug.LogWarning("[SupabaseCaughtFishSyncService] UserService was not ready before startup sync timed out.");
         }
 
         private IEnumerator EnsureAuthenticatedRoutine(Action<string> onComplete)
@@ -229,12 +328,54 @@ namespace MultiplayFishing.Core
                 .Replace("\t", "\\t");
         }
 
+        private static List<CaughtFishRow> ParseCaughtFishRows(string json)
+        {
+            List<CaughtFishRow> rows = new List<CaughtFishRow>();
+            if (string.IsNullOrWhiteSpace(json) || json == "[]")
+            {
+                return rows;
+            }
+
+            string wrappedJson = "{\"rows\":" + json + "}";
+            CaughtFishRowsWrapper wrapper = JsonUtility.FromJson<CaughtFishRowsWrapper>(wrappedJson);
+            if (wrapper?.rows != null)
+            {
+                rows.AddRange(wrapper.rows);
+            }
+
+            return rows;
+        }
+
+        private static long ParseTimestamp(string value)
+        {
+            if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset timestamp))
+            {
+                return timestamp.ToUnixTimeSeconds();
+            }
+
+            return DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        }
+
         [Serializable]
         private sealed class SupabaseAuthSession
         {
             public string access_token = "";
             public string refresh_token = "";
             public int expires_in = 3600;
+        }
+
+        [Serializable]
+        private sealed class CaughtFishRowsWrapper
+        {
+            public CaughtFishRow[] rows = Array.Empty<CaughtFishRow>();
+        }
+
+        [Serializable]
+        private sealed class CaughtFishRow
+        {
+            public string fish_id = "";
+            public float length_cm = 0f;
+            public string caught_at = "";
         }
     }
 }

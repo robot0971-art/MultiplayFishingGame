@@ -22,6 +22,8 @@ When a local player successfully catches a fish:
 3. If Supabase is configured, it signs in anonymously, stores the session in `PlayerPrefs`, then inserts into `public.caught_fish`.
 4. If Supabase is not configured, the game continues with only local save.
 
+On startup, `SupabaseCaughtFishSyncService` also reads the current user's `caught_fish` rows and merges missing fish into the local `UserData` cache. Existing UI can keep reading `userService.UserData`.
+
 ## Security Notes
 
 - Do not put a `service_role` key in Unity.
@@ -32,3 +34,5 @@ When a local player successfully catches a fish:
 ## Notes
 
 `Access Token` is kept on the config asset only as a temporary fallback field. The pilot now signs in anonymously at runtime and refreshes the session with the saved refresh token.
+
+The local `UserData.json` file is still used as a cache. Supabase is the remote source for caught fish history, but the current inventory/encyclopedia UI stays unchanged.

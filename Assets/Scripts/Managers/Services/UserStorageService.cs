@@ -42,6 +42,34 @@ namespace MultiplayFishing.Core
             OnDataChanged?.Invoke(); // UI에 알림
         }
 
+        public bool MergeFishFromRemote(string fishId, float length, long caughtTime)
+        {
+            EnsureUserData();
+
+            if (string.IsNullOrWhiteSpace(fishId))
+            {
+                return false;
+            }
+
+            bool alreadyExists = userData.inventory.Exists(item =>
+                item.fishId == fishId &&
+                Mathf.Abs(item.length - length) < 0.01f &&
+                item.caughtTime == caughtTime);
+
+            if (alreadyExists)
+            {
+                return false;
+            }
+
+            InventoryItem remoteItem = new InventoryItem(fishId, length)
+            {
+                caughtTime = caughtTime
+            };
+            userData.inventory.Add(remoteItem);
+            userData.UpdateEncyclopedia(fishId, length);
+            return true;
+        }
+
         public void SellFish(string instanceId)
         {
             InventoryItem item = userData.inventory.Find(x => x.instanceId == instanceId);
@@ -243,6 +271,12 @@ namespace MultiplayFishing.Core
                 Debug.Log($"[UserStorageService] Cleaned {removedInventory} ghost inventory items and {removedEncyclopedia} ghost encyclopedia records.");
                 Save();
             }
+        }
+
+        public void SaveRemoteMerge()
+        {
+            Save();
+            OnDataChanged?.Invoke();
         }
 
         private void EnsureUserData()
