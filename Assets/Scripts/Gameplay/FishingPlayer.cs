@@ -361,6 +361,7 @@ namespace MultiplayFishing.Gameplay
         private FishDataSO pendingFish;
         private float pendingFishLength;
         private Coroutine serverFishingRoutine;
+        private ICaughtFishSyncService caughtFishSyncService;
 
         private void SetupFishingController()
         {
@@ -723,6 +724,18 @@ namespace MultiplayFishing.Gameplay
                 
                 // IUserService.AddFish는 내부적으로 경험치 추가, 도감 갱신, 저장을 모두 수행합니다.
                 userService.AddFish(fishId, length);
+                if (caughtFishSyncService == null)
+                {
+                    DIContainer.TryResolve(out caughtFishSyncService);
+                }
+
+                if (dataService == null)
+                {
+                    dataService = DIContainer.Resolve<IDataService>();
+                }
+
+                FishDataSO fishData = dataService != null ? dataService.GetFishData(fishId) : null;
+                caughtFishSyncService?.SaveCaughtFish(playerName, fishId, length, fishData);
                 
                 Debug.Log($"<color=green>[낚시 성공]</color> {fishId} 획득!");
                 OnSystemMessage?.Invoke($"[낚시 성공] {fishId} 획득!");
