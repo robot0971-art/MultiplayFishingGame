@@ -104,6 +104,33 @@ namespace MultiplayFishing.Core
             StartCoroutine(MarkCaughtFishSoldRoutine(remoteItems));
         }
 
+        public void SyncWalletToLocal(IUserService userService)
+        {
+            if (!IsConfigured)
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase config is missing. Skipping wallet sync.");
+                return;
+            }
+
+            if (userService == null)
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] UserService is missing. Skipping wallet sync.");
+                return;
+            }
+
+            StartCoroutine(SyncWalletToLocalRoutine(userService));
+        }
+
+        public void SaveWallet(int gold)
+        {
+            if (!IsConfigured)
+            {
+                return;
+            }
+
+            StartCoroutine(SaveWalletRoutine(Mathf.Max(0, gold)));
+        }
+
         private IEnumerator PostCaughtFishRoutine(string playerName, string fishId, float length, FishDataSO fishData)
         {
             string accessToken = null;
@@ -194,6 +221,94 @@ namespace MultiplayFishing.Core
             Debug.Log($"[SupabaseCaughtFishSyncService] Synced {rows.Count} remote caught fish rows. Merged {mergedCount} new local items.");
         }
 
+        private IEnumerator SyncWalletToLocalRoutine(IUserService userService)
+        {
+            string accessToken = null;
+            yield return EnsureAuthenticatedRoutine(token => accessToken = token);
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase anonymous auth failed. Skipping wallet sync.");
+                yield break;
+            }
+
+            string url = $"{config.ProjectUrl}/rest/v1/wallets?select=gold&limit=1";
+            using UnityWebRequest request = UnityWebRequest.Get(url);
+            request.SetRequestHeader("apikey", config.PublishableKey);
+            request.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+
+            if (logRequests)
+            {
+                Debug.Log($"[SupabaseCaughtFishSyncService] GET {url}");
+            }
+
+            yield return request.SendWebRequest();
+
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogWarning(
+                    $"[SupabaseCaughtFishSyncService] Failed to sync wallet. " +
+                    $"Code={request.responseCode}, Error={request.error}, Body={request.downloadHandler.text}");
+                yield break;
+            }
+
+            List<WalletRow> rows = ParseWalletRows(request.downloadHandler.text);
+            if (rows.Count == 0)
+            {
+                SaveWallet(userService.UserData.gold);
+                Debug.Log($"[SupabaseCaughtFishSyncService] Created remote wallet from local gold: {userService.UserData.gold}.");
+                yield break;
+            }
+
+            if (userService.SetGoldFromRemote(rows[0].gold))
+            {
+                userService.SaveRemoteMerge();
+            }
+
+            Debug.Log($"[SupabaseCaughtFishSyncService] Synced wallet gold: {rows[0].gold}.");
+        }
+
+        private IEnumerator SaveWalletRoutine(int gold)
+        {
+            string accessToken = null;
+            yield return EnsureAuthenticatedRoutine(token => accessToken = token);
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase anonymous auth failed. Skipping wallet save.");
+                yield break;
+            }
+
+            string url = $"{config.ProjectUrl}/rest/v1/wallets?on_conflict=user_id";
+            string body = $"{{\"gold\":{gold},\"updated_at\":\"{DateTimeOffset.UtcNow:O}\"}}";
+            byte[] payload = Encoding.UTF8.GetBytes(body);
+
+            using UnityWebRequest request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST);
+            request.uploadHandler = new UploadHandlerRaw(payload);
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.SetRequestHeader("apikey", config.PublishableKey);
+            request.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+            request.SetRequestHeader("Prefer", "resolution=merge-duplicates,return=minimal");
+
+            if (logRequests)
+            {
+                Debug.Log($"[SupabaseCaughtFishSyncService] UPSERT {url} {body}");
+            }
+
+            yield return request.SendWebRequest();
+
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                Debug.Log($"[SupabaseCaughtFishSyncService] Saved wallet gold: {gold}.");
+                yield break;
+            }
+
+            Debug.LogWarning(
+                $"[SupabaseCaughtFishSyncService] Failed to save wallet. " +
+                $"Code={request.responseCode}, Error={request.error}, Body={request.downloadHandler.text}");
+        }
+
         private IEnumerator MarkCaughtFishSoldRoutine(IEnumerable<InventoryItem> items)
         {
             string accessToken = null;
@@ -246,6 +361,7 @@ namespace MultiplayFishing.Core
             {
                 if (DIContainer.TryResolve(out IUserService userService))
                 {
+                    SyncWalletToLocal(userService);
                     SyncCaughtFishToLocal(userService);
                     yield break;
                 }
@@ -423,6 +539,24 @@ namespace MultiplayFishing.Core
             return rows;
         }
 
+        private static List<WalletRow> ParseWalletRows(string json)
+        {
+            List<WalletRow> rows = new List<WalletRow>();
+            if (string.IsNullOrWhiteSpace(json) || json == "[]")
+            {
+                return rows;
+            }
+
+            string wrappedJson = "{\"rows\":" + json + "}";
+            WalletRowsWrapper wrapper = JsonUtility.FromJson<WalletRowsWrapper>(wrappedJson);
+            if (wrapper?.rows != null)
+            {
+                rows.AddRange(wrapper.rows);
+            }
+
+            return rows;
+        }
+
         private static long ParseTimestamp(string value)
         {
             if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset timestamp))
@@ -468,6 +602,18 @@ namespace MultiplayFishing.Core
             public string fish_id = "";
             public float length_cm = 0f;
             public string caught_at = "";
+        }
+
+        [Serializable]
+        private sealed class WalletRowsWrapper
+        {
+            public WalletRow[] rows = Array.Empty<WalletRow>();
+        }
+
+        [Serializable]
+        private sealed class WalletRow
+        {
+            public int gold = 0;
         }
     }
 }

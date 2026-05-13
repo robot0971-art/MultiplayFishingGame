@@ -10,5 +10,7 @@ namespace MultiplayFishing.Core
         void SyncCaughtFishToLocal(IUserService userService);
         void MarkCaughtFishSold(InventoryItem item);
         void MarkCaughtFishSold(System.Collections.Generic.IEnumerable<InventoryItem> items);
+        void SyncWalletToLocal(IUserService userService);
+        void SaveWallet(int gold);
     }
 }

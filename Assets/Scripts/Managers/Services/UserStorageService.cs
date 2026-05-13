@@ -74,6 +74,19 @@ namespace MultiplayFishing.Core
             return true;
         }
 
+        public bool SetGoldFromRemote(int gold)
+        {
+            EnsureUserData();
+            gold = Mathf.Max(0, gold);
+            if (userData.gold == gold)
+            {
+                return false;
+            }
+
+            userData.gold = gold;
+            return true;
+        }
+
         public void SellFish(string instanceId)
         {
             InventoryItem item = userData.inventory.Find(x => x.instanceId == instanceId);
@@ -87,6 +100,7 @@ namespace MultiplayFishing.Core
                     SyncSoldFish(item);
                     Debug.Log($"[UserStorageService] Sold {fishInfo.fishName}. Current Gold: {userData.gold}");
                     Save();
+                    SyncWallet();
                     OnDataChanged?.Invoke(); // UI에 알림
                 }
             }
@@ -114,6 +128,7 @@ namespace MultiplayFishing.Core
             Debug.Log($"[UserStorageService] Bulk sold all fish. Gained {totalGain}G. Total Gold: {userData.gold}");
             
             Save();
+            SyncWallet();
             OnDataChanged?.Invoke();
         }
 
@@ -161,6 +176,7 @@ namespace MultiplayFishing.Core
 
             Debug.Log($"[UserStorageService] Purchased {itemType} {itemId}. Gold left: {userData.gold}");
             Save();
+            SyncWallet();
             OnDataChanged?.Invoke();
             return true;
         }
@@ -320,6 +336,12 @@ namespace MultiplayFishing.Core
             if (caughtFishSyncService != null) return;
 
             DIContainer.TryResolve(out caughtFishSyncService);
+        }
+
+        private void SyncWallet()
+        {
+            EnsureCaughtFishSyncService();
+            caughtFishSyncService?.SaveWallet(userData.gold);
         }
     }
 }
