@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using MultiplayFishing.Data.Models;
 
 namespace MultiplayFishing.Core
@@ -17,6 +18,11 @@ namespace MultiplayFishing.Core
         void AddFish(string fishId, float length);
         bool MergeFishFromRemote(string remoteId, string fishId, float length, long caughtTime);
         bool SetGoldFromRemote(int gold);
+        bool SetEquipmentFromRemote(
+            IEnumerable<string> ownedRodIds,
+            IEnumerable<string> ownedBaitIds,
+            string equippedRodId,
+            string equippedBaitId);
         void SaveRemoteMerge();
 
         void SellFish(string instanceId);

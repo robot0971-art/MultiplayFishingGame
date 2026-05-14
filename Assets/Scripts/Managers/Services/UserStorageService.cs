@@ -87,6 +87,42 @@ namespace MultiplayFishing.Core
             return true;
         }
 
+        public bool SetEquipmentFromRemote(
+            IEnumerable<string> ownedRodIds,
+            IEnumerable<string> ownedBaitIds,
+            string equippedRodId,
+            string equippedBaitId)
+        {
+            EnsureUserData();
+
+            List<string> nextRodIds = SanitizeIds(ownedRodIds);
+            List<string> nextBaitIds = SanitizeIds(ownedBaitIds);
+            if (!nextRodIds.Contains("rod_basic"))
+            {
+                nextRodIds.Add("rod_basic");
+            }
+
+            equippedRodId = nextRodIds.Contains(equippedRodId) ? equippedRodId : "";
+            equippedBaitId = nextBaitIds.Contains(equippedBaitId) ? equippedBaitId : "";
+
+            bool changed =
+                !AreStringListsEqual(userData.ownedRodIds, nextRodIds) ||
+                !AreStringListsEqual(userData.ownedBaitIds, nextBaitIds) ||
+                userData.equippedRodId != equippedRodId ||
+                userData.equippedBaitId != equippedBaitId;
+
+            if (!changed)
+            {
+                return false;
+            }
+
+            userData.ownedRodIds = nextRodIds;
+            userData.ownedBaitIds = nextBaitIds;
+            userData.equippedRodId = equippedRodId;
+            userData.equippedBaitId = equippedBaitId;
+            return true;
+        }
+
         public void SellFish(string instanceId)
         {
             InventoryItem item = userData.inventory.Find(x => x.instanceId == instanceId);
@@ -177,6 +213,7 @@ namespace MultiplayFishing.Core
             Debug.Log($"[UserStorageService] Purchased {itemType} {itemId}. Gold left: {userData.gold}");
             Save();
             SyncWallet();
+            SyncEquipment();
             OnDataChanged?.Invoke();
             return true;
         }
@@ -189,6 +226,7 @@ namespace MultiplayFishing.Core
             userData.equippedRodId = rodId;
             Debug.Log($"[UserStorageService] Equipped rod: {rodId}");
             Save();
+            SyncEquipment();
             OnDataChanged?.Invoke();
             return true;
         }
@@ -201,6 +239,7 @@ namespace MultiplayFishing.Core
             userData.equippedBaitId = baitId;
             Debug.Log($"[UserStorageService] Equipped bait: {baitId}");
             Save();
+            SyncEquipment();
             OnDataChanged?.Invoke();
             return true;
         }
@@ -212,6 +251,7 @@ namespace MultiplayFishing.Core
             userData.equippedRodId = "";
             Debug.Log($"[UserStorageService] Unequipped rod.");
             Save();
+            SyncEquipment();
             OnDataChanged?.Invoke();
         }
 
@@ -222,6 +262,7 @@ namespace MultiplayFishing.Core
             userData.equippedBaitId = "";
             Debug.Log($"[UserStorageService] Unequipped bait.");
             Save();
+            SyncEquipment();
             OnDataChanged?.Invoke();
         }
 
@@ -342,6 +383,56 @@ namespace MultiplayFishing.Core
         {
             EnsureCaughtFishSyncService();
             caughtFishSyncService?.SaveWallet(userData.gold);
+        }
+
+        private void SyncEquipment()
+        {
+            EnsureCaughtFishSyncService();
+            caughtFishSyncService?.SaveEquipment(userData);
+        }
+
+        private static List<string> SanitizeIds(IEnumerable<string> ids)
+        {
+            List<string> result = new List<string>();
+            if (ids == null)
+            {
+                return result;
+            }
+
+            foreach (string id in ids)
+            {
+                if (string.IsNullOrWhiteSpace(id) || result.Contains(id))
+                {
+                    continue;
+                }
+
+                result.Add(id.Trim());
+            }
+
+            return result;
+        }
+
+        private static bool AreStringListsEqual(List<string> left, List<string> right)
+        {
+            if (left == null || right == null)
+            {
+                return left == right;
+            }
+
+            if (left.Count != right.Count)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < left.Count; i++)
+            {
+                if (left[i] != right[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
     }
 }

@@ -158,6 +158,33 @@ namespace MultiplayFishing.Core
             StartCoroutine(SaveWalletRoutine(Mathf.Max(0, gold)));
         }
 
+        public void SyncEquipmentToLocal(IUserService userService)
+        {
+            if (!IsConfigured)
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase config is missing. Skipping equipment sync.");
+                return;
+            }
+
+            if (userService == null)
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] UserService is missing. Skipping equipment sync.");
+                return;
+            }
+
+            StartCoroutine(SyncEquipmentToLocalRoutine(userService));
+        }
+
+        public void SaveEquipment(UserSaveData userData)
+        {
+            if (!IsConfigured || userData == null)
+            {
+                return;
+            }
+
+            StartCoroutine(SaveEquipmentRoutine(userData));
+        }
+
         private IEnumerator PostCaughtFishRoutine(string playerName, string fishId, float length, FishDataSO fishData)
         {
             string accessToken = null;
@@ -383,6 +410,99 @@ namespace MultiplayFishing.Core
             Debug.Log($"[SupabaseCaughtFishSyncService] Synced wallet gold: {rows[0].gold}.");
         }
 
+        private IEnumerator SyncEquipmentToLocalRoutine(IUserService userService)
+        {
+            string accessToken = null;
+            yield return EnsureAuthenticatedRoutine(token => accessToken = token);
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase anonymous auth failed. Skipping equipment sync.");
+                yield break;
+            }
+
+            string url = $"{config.ProjectUrl}/rest/v1/player_equipment?select=owned_rod_ids,owned_bait_ids,equipped_rod_id,equipped_bait_id&limit=1";
+            using UnityWebRequest request = UnityWebRequest.Get(url);
+            request.SetRequestHeader("apikey", config.PublishableKey);
+            request.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+
+            if (logRequests)
+            {
+                Debug.Log($"[SupabaseCaughtFishSyncService] GET {url}");
+            }
+
+            yield return request.SendWebRequest();
+
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogWarning(
+                    $"[SupabaseCaughtFishSyncService] Failed to sync equipment. " +
+                    $"Code={request.responseCode}, Error={request.error}, Body={request.downloadHandler.text}");
+                yield break;
+            }
+
+            List<EquipmentRow> rows = ParseEquipmentRows(request.downloadHandler.text);
+            if (rows.Count == 0)
+            {
+                SaveEquipment(userService.UserData);
+                Debug.Log("[SupabaseCaughtFishSyncService] Created remote equipment from local save.");
+                yield break;
+            }
+
+            EquipmentRow row = rows[0];
+            if (userService.SetEquipmentFromRemote(
+                row.owned_rod_ids,
+                row.owned_bait_ids,
+                row.equipped_rod_id,
+                row.equipped_bait_id))
+            {
+                userService.SaveRemoteMerge();
+            }
+
+            Debug.Log("[SupabaseCaughtFishSyncService] Synced equipment.");
+        }
+
+        private IEnumerator SaveEquipmentRoutine(UserSaveData userData)
+        {
+            string accessToken = null;
+            yield return EnsureAuthenticatedRoutine(token => accessToken = token);
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                Debug.LogWarning("[SupabaseCaughtFishSyncService] Supabase anonymous auth failed. Skipping equipment save.");
+                yield break;
+            }
+
+            string url = $"{config.ProjectUrl}/rest/v1/player_equipment?on_conflict=user_id";
+            string body = BuildEquipmentJson(userData);
+            byte[] payload = Encoding.UTF8.GetBytes(body);
+
+            using UnityWebRequest request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST);
+            request.uploadHandler = new UploadHandlerRaw(payload);
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.SetRequestHeader("apikey", config.PublishableKey);
+            request.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+            request.SetRequestHeader("Prefer", "resolution=merge-duplicates,return=minimal");
+
+            if (logRequests)
+            {
+                Debug.Log($"[SupabaseCaughtFishSyncService] UPSERT {url} {body}");
+            }
+
+            yield return request.SendWebRequest();
+
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                Debug.Log("[SupabaseCaughtFishSyncService] Saved equipment.");
+                yield break;
+            }
+
+            Debug.LogWarning(
+                $"[SupabaseCaughtFishSyncService] Failed to save equipment. " +
+                $"Code={request.responseCode}, Error={request.error}, Body={request.downloadHandler.text}");
+        }
+
         private IEnumerator SaveWalletRoutine(int gold)
         {
             string accessToken = null;
@@ -477,6 +597,7 @@ namespace MultiplayFishing.Core
                 if (DIContainer.TryResolve(out IUserService userService))
                 {
                     SyncWalletToLocal(userService);
+                    SyncEquipmentToLocal(userService);
                     SyncCaughtFishToLocal(userService);
                     yield break;
                 }
@@ -629,6 +750,48 @@ namespace MultiplayFishing.Core
                 "}";
         }
 
+        private static string BuildEquipmentJson(UserSaveData userData)
+        {
+            return "{" +
+                $"\"owned_rod_ids\":{BuildJsonArray(userData.ownedRodIds)}," +
+                $"\"owned_bait_ids\":{BuildJsonArray(userData.ownedBaitIds)}," +
+                $"\"equipped_rod_id\":\"{EscapeJson(userData.equippedRodId)}\"," +
+                $"\"equipped_bait_id\":\"{EscapeJson(userData.equippedBaitId)}\"," +
+                $"\"updated_at\":\"{DateTimeOffset.UtcNow:O}\"" +
+                "}";
+        }
+
+        private static string BuildJsonArray(IEnumerable<string> values)
+        {
+            if (values == null)
+            {
+                return "[]";
+            }
+
+            StringBuilder builder = new StringBuilder("[");
+            bool hasValue = false;
+            foreach (string value in values)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                if (hasValue)
+                {
+                    builder.Append(",");
+                }
+
+                builder.Append("\"");
+                builder.Append(EscapeJson(value.Trim()));
+                builder.Append("\"");
+                hasValue = true;
+            }
+
+            builder.Append("]");
+            return builder.ToString();
+        }
+
         private static string NormalizePlayerName(string playerName)
         {
             return string.IsNullOrWhiteSpace(playerName) ? "" : playerName.Trim();
@@ -695,6 +858,24 @@ namespace MultiplayFishing.Core
 
             string wrappedJson = "{\"rows\":" + json + "}";
             WalletRowsWrapper wrapper = JsonUtility.FromJson<WalletRowsWrapper>(wrappedJson);
+            if (wrapper?.rows != null)
+            {
+                rows.AddRange(wrapper.rows);
+            }
+
+            return rows;
+        }
+
+        private static List<EquipmentRow> ParseEquipmentRows(string json)
+        {
+            List<EquipmentRow> rows = new List<EquipmentRow>();
+            if (string.IsNullOrWhiteSpace(json) || json == "[]")
+            {
+                return rows;
+            }
+
+            string wrappedJson = "{\"rows\":" + json + "}";
+            EquipmentRowsWrapper wrapper = JsonUtility.FromJson<EquipmentRowsWrapper>(wrappedJson);
             if (wrapper?.rows != null)
             {
                 rows.AddRange(wrapper.rows);
@@ -772,6 +953,21 @@ namespace MultiplayFishing.Core
         private sealed class WalletRow
         {
             public int gold = 0;
+        }
+
+        [Serializable]
+        private sealed class EquipmentRowsWrapper
+        {
+            public EquipmentRow[] rows = Array.Empty<EquipmentRow>();
+        }
+
+        [Serializable]
+        private sealed class EquipmentRow
+        {
+            public string[] owned_rod_ids = Array.Empty<string>();
+            public string[] owned_bait_ids = Array.Empty<string>();
+            public string equipped_rod_id = "";
+            public string equipped_bait_id = "";
         }
     }
 }

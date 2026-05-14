@@ -11,6 +11,7 @@ This pilot stores a successful catch in Supabase without changing the local save
    - `supabase/migrations/0002_caught_fish_sold_state.sql`
    - `supabase/migrations/0003_wallets.sql`
    - `supabase/migrations/0004_profile_user_id_default.sql`
+   - `supabase/migrations/0005_player_equipment.sql`
 4. In Unity, create a config asset:
    - `Assets/Create/Fishing/Supabase Project Config`
    - Set `Project Url` to `https://<project-ref>.supabase.co`
@@ -30,6 +31,7 @@ On startup, `SupabaseCaughtFishSyncService` also reads the current user's `caugh
 Sold fish are marked with `sold_at` and `sold_price` in Supabase, then excluded from future local cache syncs.
 The same service also syncs the current user's gold through `public.wallets`. Startup pulls the remote wallet into local `UserData`, and selling fish or buying shop items upserts the latest gold value.
 The local player's display name is synced through `public.profiles`. Startup prefers the remote `player_name`; if no profile exists yet, the current local `PlayerPrefs` name is uploaded as the initial profile name.
+Owned rods, owned baits, and equipped rod/bait ids are synced through `public.player_equipment`. Buying, equipping, or unequipping gear upserts the current equipment state.
 
 ## Security Notes
 
@@ -38,6 +40,7 @@ The local player's display name is synced through `public.profiles`. Startup pre
 - `caught_fish.user_id` defaults to `auth.uid()`.
 - `wallets.user_id` defaults to `auth.uid()`.
 - `profiles.user_id` defaults to `auth.uid()`.
+- `player_equipment.user_id` defaults to `auth.uid()`.
 - Insert/select/update policies only allow authenticated users to access their own rows.
 
 ## Notes
@@ -48,3 +51,4 @@ The local `UserData.json` file is still used as a cache. Supabase is the remote 
 
 Run `supabase/migrations/0003_wallets.sql` before testing gold sync. After selling a fish, check the `wallets` table: the row for the anonymous user should show the updated `gold` value.
 Run `supabase/migrations/0004_profile_user_id_default.sql` before testing profile sync. After entering the play scene, check the `profiles` table: the row for the anonymous user should show `player_name`.
+Run `supabase/migrations/0005_player_equipment.sql` before testing gear sync. After buying or equipping a rod or bait, check the `player_equipment` table for `owned_rod_ids`, `owned_bait_ids`, `equipped_rod_id`, and `equipped_bait_id`.
