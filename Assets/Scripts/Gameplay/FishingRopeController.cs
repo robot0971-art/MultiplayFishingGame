@@ -373,9 +373,8 @@ namespace MultiplayFishing.Gameplay
                     hookPoint.position = nextPosition;
                     TrackExpectedHookPosition(nextPosition);
                     SetRopeLength(GetDesiredRopeLength(nextPosition, currentMinimumRopeLength, currentRopeSlack));
-                    yield return new WaitForEndOfFrame();
-                    WarnIfHookPositionWasOverwritten("MoveHook frame");
                     yield return null;
+                    WarnIfHookPositionWasOverwritten("MoveHook frame");
                 }
 
                 // Apply the final evaluated position after the motion completes.
@@ -403,7 +402,7 @@ namespace MultiplayFishing.Gameplay
                 hookPoint.position = finalPosition;
                 TrackExpectedHookPosition(finalPosition);
                 SetRopeLength(GetDesiredRopeLength(finalPosition, finalMinimumRopeLength, finalRopeSlack));
-                yield return new WaitForEndOfFrame();
+                yield return null;
                 WarnIfHookPositionWasOverwritten("MoveHook final");
 
                 if (hideRopeOnComplete)

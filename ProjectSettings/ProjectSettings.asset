@@ -930,11 +930,11 @@ PlayerSettings:
   captureStartupLogs: {}
   activeInputHandler: 2
   windowsGamepadBackendHint: 0
-  cloudProjectId: e2b247cc-7ea2-48ea-a457-b388058485f3
+  cloudProjectId: a1bffdce-dfda-4942-b344-709f574de366
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: MFishingOnline
-  organizationId: kimjunwoo1206112
+  projectName: MultiplayFishingGame
+  organizationId: dmsdn0352
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   hmiLoadingImage: {fileID: 0}

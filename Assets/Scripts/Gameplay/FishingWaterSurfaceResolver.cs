@@ -200,21 +200,30 @@ namespace MultiplayFishing.Gameplay
                 return;
             }
 
-            GameObject waterObject = GameObject.Find("WaterBlock_50m");
-            if (waterObject == null)
+            Transform waterTransform = FindWaterSurfaceTransformByName();
+            if (waterTransform != null)
             {
-                waterObject = GameObject.Find("WaterBlock_50m (1)");
+                WaterSurfaceTransform = waterTransform;
+            }
+        }
+
+        private static Transform FindWaterSurfaceTransformByName()
+        {
+            Transform[] transforms = UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsSortMode.None);
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                Transform candidate = transforms[i];
+                if (candidate == null) continue;
+
+                if (candidate.name == "WaterBlock_50m"
+                    || candidate.name == "WaterBlock_50m (1)"
+                    || candidate.name == "Water")
+                {
+                    return candidate;
+                }
             }
 
-            if (waterObject == null)
-            {
-                waterObject = GameObject.Find("Water");
-            }
-
-            if (waterObject != null)
-            {
-                WaterSurfaceTransform = waterObject.transform;
-            }
+            return null;
         }
     }
 }

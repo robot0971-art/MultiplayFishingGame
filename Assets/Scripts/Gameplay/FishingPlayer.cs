@@ -337,6 +337,7 @@ namespace MultiplayFishing.Gameplay
 
             if (IsFishing) return;
 
+            HandleSprintInput();
             UpdateSprintUI();
         }
 
@@ -372,11 +373,15 @@ namespace MultiplayFishing.Gameplay
         {
             if (sprintStatusText == null && !sprintUISearched)
             {
-                GameObject sprintObj = GameObject.Find("SprintStatusText");
-                if (sprintObj != null)
+                TMPro.TMP_Text[] texts = FindObjectsByType<TMPro.TMP_Text>(FindObjectsSortMode.None);
+                foreach (TMPro.TMP_Text text in texts)
                 {
-                    sprintStatusText = sprintObj.GetComponent<TMPro.TMP_Text>();
+                    if (text.name != "SprintStatusText") continue;
+
+                    sprintStatusText = text;
+                    break;
                 }
+
                 sprintUISearched = true;
             }
 

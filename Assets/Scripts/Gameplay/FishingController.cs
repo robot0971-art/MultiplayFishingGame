@@ -710,17 +710,33 @@ namespace MultiplayFishing.Gameplay
 
         private void EndFishing()
         {
-            StopReelingSound();
             waitingForCastRelease = false;
             StopCastReleaseFallback();
-            if (stateRoutine != null) StopCoroutine(stateRoutine);
-            stateRoutine = ropeController != null && ropeController.IsConfigured
-                ? StartCoroutine(ReelToIdleRoutine())
-                : null;
-            ropeController?.SetVisible(false);
-            fishingLineVisual?.SetFishingActive(false);
+
+            if (stateRoutine != null)
+            {
+                StopCoroutine(stateRoutine);
+            }
+
+            stateRoutine = StartCoroutine(EndFishingRoutine());
+        }
+
+        private IEnumerator EndFishingRoutine()
+        {
+            if (ropeController != null && ropeController.IsConfigured)
+            {
+                fishingLineVisual?.SetFishingActive(false);
+                yield return ReelToIdleRoutine();
+            }
+            else
+            {
+                StopReelingSound();
+                ropeController?.SetVisible(false);
+            }
+
             SetHasFishBool(false);
             ChangeState(FishingState.Idle);
+            stateRoutine = null;
         }
 
         private IEnumerator ReelToIdleRoutine()

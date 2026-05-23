@@ -76,10 +76,9 @@ namespace MultiplayFishing.Gameplay
         {
             base.OnStartClient();
 
-            // 원격 플레이어(다른 클라이언트의 캐릭터)는 NetworkTransform 보간으로
-            // 위치를 받아 표시만 하면 되므로 CharacterController를 비활성화합니다.
-            // 이를 통해 물리 엔진과 NetworkTransform의 위치 덮어쓰기 충돌을 방지합니다.
-            if (!isServer && !isLocalPlayer)
+            // 클라이언트는 NetworkTransform 보간 결과만 표시합니다.
+            // CharacterController가 같이 켜져 있으면 서버 위치 보정과 충돌해 화면 떨림이 생길 수 있습니다.
+            if (!isServer)
             {
                 SetCharacterControllerActive(false);
             }
